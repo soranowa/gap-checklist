@@ -90,6 +90,8 @@ textarea{min-height:0;resize:vertical}
 .refs{margin-top:8px;display:grid;gap:4px}
 .ref{display:flex;gap:8px;align-items:baseline;font-size:14px;padding:6px 8px;border-radius:8px;background:var(--soft);flex-wrap:wrap}
 .ref .rl{font-size:12px;color:var(--mut);flex:none}
+.ref.pv{background:transparent;border:1px dashed var(--line)}
+.pvc{margin-left:auto;border:1px solid var(--acc);color:var(--acc);background:var(--card);border-radius:8px;padding:2px 10px;font-size:13px;font-weight:700;cursor:pointer}
 .ref .rc{flex:1 1 100%;font-size:13px;color:var(--mut)}
 .vv{display:inline-block;min-width:26px;text-align:center;font-weight:800;border-radius:6px;padding:0 6px}
 .vv.vo{color:var(--o);background:var(--o-bg)}.vv.vx{color:var(--x);background:var(--x-bg)}.vv.vn{color:var(--n);background:var(--n-bg)}.vv.v0{color:var(--mut);font-weight:400;font-size:12px}
@@ -236,10 +238,10 @@ function st(items,get){const s={n:items.length,o:0,x:0,na:0,todo:0};items.forEac
 const cropLabel=(crops,txt)=>{crops=crops||[];txt=String(txt||'').trim();if(txt&&crops.every(c=>txt.includes(c)))return txt;return [crops.join('・'),txt].filter(Boolean).join(' ／ ')};
 
 /* ========== 状態 ========== */
-let P=load('p'), G=load('g'), A=load('a'), AS=load('as');
-const UI={view:'home',filter:'all',q:'',tid:null,tpl:null,sheet:null,openC:new Set(),ctx:null,lq:''};
+let P=load('p'), G=load('g'), A=load('a'), AS=load('as'), PV=load('pv')||{recs:[],idmap:{}};
+const UI={showPrev:true,view:'home',filter:'all',q:'',tid:null,tpl:null,sheet:null,openC:new Set(),ctx:null,lq:''};
 let saveT=null,storeWarned=false;
-function persist(){clearTimeout(saveT);saveT=setTimeout(()=>{const ok=[['p',P],['g',G],['a',A],['as',AS]].every(([k,v])=>v?store(k,v):(drop(k),true));
+function persist(){clearTimeout(saveT);saveT=setTimeout(()=>{const ok=[['p',P],['g',G],['a',A],['as',AS],['pv',PV]].every(([k,v])=>v?store(k,v):(drop(k),true));
   if(!ok&&!storeWarned){storeWarned=true;toast('この端末には自動保存できませんでした。こまめに「ファイルに保存」してください',5000)}},300)}
 function touch(o){if(o)o.updated=nowISO();persist();const d=$('#dirty');if(d)d.textContent='ファイル未保存の変更あり'}
 
@@ -249,6 +251,42 @@ function bar(title,back){return `<div class="bar">${back?`<button class="bk" dat
 function go(v,opt={}){UI.view=v;UI.filter='all';UI.q='';UI.openC.clear();if(opt.tid!==undefined)UI.tid=opt.tid;render();window.scrollTo(0,0)}
 function render(){UI.ctx=null;const f=VIEWS[UI.view]||VIEWS.home;app.innerHTML=f()}
 function dirtyMark(o){return o&&(!o.savedAt||o.updated>o.savedAt)?'<span id="dirty" class="dirty">ファイル未保存の変更あり</span>':'<span id="dirty" class="dirty"></span>'}
+
+
+/* ========== 前回の結果（参照・コピー用） ========== */
+const nn=s=>String(s||'').replace(/[\s　]/g,'');
+const KLABEL={self:'自己点検',internal:'内部監査',twoparty:'二者点検',audit:'監査'};
+function splitWho(v,c,who){v=String(v||'');c=String(c||'');
+  if(/[生団]/.test(v)){const m=v.match(new RegExp(who+'\\s*([○〇◯✕×xXー－\\-―])'));v=m?normV(m[1]):''}else v=normV(v);
+  if(/^(生|団)：/m.test(c)){c=c.split('\n').filter(l=>l.startsWith(who+'：')).map(l=>l.slice(2)).join('\n')}
+  else if(/^【団体】/.test(c))c=who==='団'?c.replace(/^【団体】[○✕ー]?\s*/,''):'';
+  return {v,c}}
+const pvName=r=>r.name||(((PV.idmap[r.selfId]||{}).p)||{})[r.tid]||'';
+function pvMatch(type,name,group){return PV.recs.map((r,i)=>Object.assign({i},r)).filter(r=>{if(r.type!==type)return false;
+  if(type==='団体')return !nn(group)||!nn(r.group)||nn(r.group)===nn(group);return nn(name)&&nn(pvName(r))===nn(name)}).sort((a,b)=>String(b.date||'').localeCompare(String(a.date||'')))}
+function pvAdd(rec){const i=PV.recs.findIndex(r=>r.key===rec.key);if(i>=0)PV.recs[i]=rec;else PV.recs.push(rec)}
+function pvAns(src){const o={};Object.entries(src||{}).forEach(([id,a])=>{if(BYID[id]&&a&&(a.v||a.c))o[id]={v:a.v||'',c:a.c||''}});return o}
+async function pvLoadFile(f){let n=0;
+  if(/\.xlsx$/i.test(f.name)){const x=await readXl(f);const isP=!!x.producer;const who=isP?'生':'団';const kind=x.tDate?'twoparty':x.iDate?'internal':'audit';
+    const self={},aud={};Object.entries(x.rows).forEach(([id,r])=>{if(isP&&r.k==='団体')return;const s1=splitWho(r.v,r.c,who);if(s1.v||s1.c)self[id]=s1;const a1=splitWho(r.f,r.g,who);if(a1.v||a1.c)aud[id]=a1});
+    const base={type:isP?'生産者':'団体',name:isP?x.producer:x.group,group:x.group,src:f.name+'（様式Excel）'};
+    if(Object.keys(self).length){pvAdd(Object.assign({key:'xl|'+f.name+'|self',kind:'self',date:isP?x.pDate:x.gDate,answers:self},base));n++}
+    if(Object.keys(aud).length){pvAdd(Object.assign({key:'xl|'+f.name+'|aud',kind,date:kind==='twoparty'?x.tDate:x.iDate,answers:aud},base));n++}
+    if(!n)throw new Error(f.name+'：点検結果が見つかりませんでした');return n}
+  const o=await readJSON(f);
+  if(o.kind==='sgap-self-producer'){pvAdd({key:o.id+'|self',kind:'self',type:'生産者',name:o.producer.name,group:o.setting.groupName,date:o.producer.date,answers:pvAns(o.answers),src:f.name});return 1}
+  if(o.kind==='sgap-self-group'){PV.idmap[o.id]={group:o.group.name,p:{}};pvAdd({key:o.id+'|group|self',kind:'self',type:'団体',name:o.group.name,group:o.group.name,date:o.self.date,answers:pvAns(o.self.answers),src:f.name});n=1;
+    (o.producers||[]).forEach(p=>{PV.idmap[o.id].p[p.id]=p.name;pvAdd({key:o.id+'|'+p.id+'|self',kind:'self',type:'生産者',name:p.name,group:o.group.name,date:p.date,answers:pvAns(p.answers),src:f.name});n++});return n}
+  if(o.kind==='sgap-audit'){Object.entries(o.targets||{}).forEach(([tid,t])=>{const ans=pvAns(t.answers);if(!Object.keys(ans).length)return;
+      pvAdd({key:o.id+'|'+tid,kind:o.type,type:tid==='group'?'団体':'生産者',tid,selfId:o.ref.selfId,name:tid==='group'?o.ref.groupName:(t.label||''),group:o.ref.groupName,date:o.date,answers:ans,src:f.name});n++});return n}
+  throw new Error(f.name+'：前回の結果として使えないファイルです（設定ファイルなど）')}
+function pvList(id,ctx){const seen=new Set();return (ctx.prevRecs||[]).map((r,k)=>({r,k,a:r.answers[id]})).filter(x=>{if(!x.a)return false;const key=[x.r.kind,x.r.date,x.a.v,x.a.c].join('|');if(seen.has(key))return false;seen.add(key);return true})}
+function prevHTML(it,ctx){const l=pvList(it.id,ctx);if(!l.length)return '';
+  return `<div class="refs">${l.map(x=>`<div class="ref pv"><span class="rl">前回 ${esc(KLABEL[x.r.kind]||'')}${x.r.date?' '+jdate(x.r.date):''}</span><b class="vv ${vcls(x.a.v)}">${x.a.v||'—'}</b>${ctx.readonly?'':`<button class="pvc" data-act="pv-copy" data-k="${x.k}">コピー</button>`}${x.a.c?`<span class="rc">${nl(x.a.c)}</span>`:''}</div>`).join('')}</div>`}
+function prevCard(matchInfo){const n=PV.recs.length;
+  return `<div class="card"><h2>前回の結果（任意）</h2><p class="mut small">過去の自己点検ファイル・集約ファイル・内部監査／二者点検ファイル・様式Excelを読み込むと、各項目に前回の結果が表示され、1項目ずつ「コピー」で入力できます。</p>
+<p class="small" style="margin:0">読み込み済み：${n}件${n&&matchInfo?'　'+matchInfo:''}</p>
+<div class="btns"><button class="btn sm" data-act="pv-load">前回の結果を読み込む</button>${n?`<button class="btn sm" data-go="pv">一覧・削除</button>`:''}</div></div>`}
 
 /* ========== 点検リスト（共通） ========== */
 const FILTERS={self:[['all','すべて'],['todo','未入力'],['x','✕のみ']],
@@ -266,6 +304,7 @@ function itemHTML(it,ctx){const a=ctx.get(it.id)||{},k=ctx.kub(it.id),refs=ctx.r
 <div class="ih"><span class="no">${it.id}</span><span class="kb k-${k}">${k}</span>${it.crop?`<span class="cr">${it.crop}</span>`:''}</div>
 <div class="it">${nl(it.t)}</div>
 ${refs.length?`<div class="refs">${refs.map(r=>`<div class="ref"><span class="rl">${esc(r.label)}</span><b class="vv ${vcls(r.v)}">${r.v||'未入力'}</b>${r.c?`<span class="rc">${nl(r.c)}</span>`:''}</div>`).join('')}</div>`:''}
+${UI.showPrev&&ctx.prevRecs&&ctx.prevRecs.length?prevHTML(it,ctx):''}
 ${ctx.readonly?`<div class="ro"><b class="vv ${vcls(a.v)}">${a.v||'未入力'}</b> ${a.c?`<span class="mut">${nl(a.c)}</span>`:''}</div>`:`
 <div class="vb">${VALS.map(([v,l])=>`<button class="v ${vcls(v)}${a.v===v?' on':''}" data-v="${v}" aria-pressed="${a.v===v}"><b>${v}</b><span>${l}</span></button>`).join('')}</div>
 <div class="cm${open?' open':''}"><button class="cmt" data-act="cmt">${a.c?'コメントを表示':'＋ コメントを書く'}</button><textarea rows="2" placeholder="${ctx.mode==='audit'?'判断理由（自己点検と評価が異なる場合は必須）':'判断した理由・状況など'}">${esc(a.c||'')}</textarea></div>
@@ -285,7 +324,7 @@ function checklist(ctx){UI.ctx=ctx;const fl=FILTERS[ctx.readonly?'ro':ctx.mode];
   const secs=M.sections.map((s,si)=>ctx.items.some(it=>it.sec===si)?`<option value="${si}">${esc(s.t)}</option>`:'').join('');
   return `<div class="prog"><div id="pg">${progHTML(ctx)}</div>
 <div class="tools"><input type="search" id="q" placeholder="番号・語句で検索" value="${esc(UI.q)}"><select id="jump"><option value="">章へ移動</option>${secs}</select></div>
-<div class="fchips">${fl.map(([k,l])=>`<button data-f="${k}" class="${UI.filter===k?'on':''}">${l}</button>`).join('')}</div></div>
+<div class="fchips">${fl.map(([k,l])=>`<button data-f="${k}" class="${UI.filter===k?'on':''}">${l}</button>`).join('')}${ctx.prevRecs&&ctx.prevRecs.length?`<button data-act="pv-toggle" class="${UI.showPrev?'on':''}" style="margin-left:auto">前回${UI.showPrev?'を表示中':'を隠し中'}</button>`:''}</div></div>
 <div id="list">${listHTML(ctx)}</div>`}
 function refreshCard(id){const el=app.querySelector(`.item[data-id="${CSS.escape(id)}"]`);if(!el||!UI.ctx)return;const t=document.createElement('div');t.innerHTML=itemHTML(BYID[id],UI.ctx);el.replaceWith(t.firstElementChild)}
 function refreshProg(){const p=$('#pg');if(p&&UI.ctx)p.innerHTML=progHTML(UI.ctx)}
@@ -318,6 +357,9 @@ VIEWS.home=()=>`${bar('生協版GAP 点検表（試作版）')}<div class="wrap"
 <div class="card"><h3>大切なこと</h3><p class="mut small" style="margin:0">入力内容はこの端末のブラウザに一時保存されますが、機種変更やブラウザの設定で消えることがあります。区切りごとに必ず「ファイルに保存」してください。記録として保管するのは保存したファイルです。</p></div>
 <button class="btn" data-go="ref" style="width:100%">資料：規範で要求している文書一覧・用語の定義</button>
 </div>`;
+VIEWS.pv=()=>`${bar('前回の結果（読み込み済み）',UI.back||'home')}<div class="wrap"><div class="card"><p class="mut small">この端末だけに保存されています。生産者名・団体名が同じものが、点検画面に表示されます。</p>
+<div class="rows">${PV.recs.map((r,i)=>({r,i})).sort((a,b)=>(a.r.type+pvName(a.r)).localeCompare(b.r.type+pvName(b.r),'ja')).map(({r,i})=>`<div class="row"><div class="rn"><b>${esc(r.type==='団体'?(r.name||r.group)+'（団体）':pvName(r)||'（名前不明：対応する集約ファイルを読み込んでください）')}</b><span>${esc(KLABEL[r.kind]||'')} ${esc(jdate(r.date))}／${Object.keys(r.answers).length}項目／${esc(r.src)}</span></div><button class="btn sm dng" data-act="pv-del" data-i="${i}">削除</button></div>`).join('')||'<p class="mut">ありません</p>'}</div>
+${PV.recs.length?`<div class="btns"><button class="btn sm dng" data-act="pv-clear">すべて削除</button></div>`:''}</div></div>`;
 VIEWS.ref=()=>`${bar('資料',UI.back||'home')}<div class="wrap"><div class="card"><h2>規範で要求している文書一覧</h2><table class="ref"><tr><th>文書名</th><th>規範番号</th></tr>${M.docs.map(d=>`<tr><td>${esc(d[0])}</td><td style="white-space:nowrap">${esc(d[1])}</td></tr>`).join('')}</table><p class="mut small">${esc(M.docnote)}</p></div>
 <div class="card"><h2>基本用語の定義</h2><table class="ref">${M.glossary.map(g=>`<tr><th style="white-space:nowrap;color:var(--ink)">${esc(g[0])}</th><td>${nl(g[1])}</td></tr>`).join('')}</table></div></div>`;
 
@@ -337,8 +379,9 @@ VIEWS['p-setup']=()=>{if(!P)return `${bar('生産者の自己点検','home')}<di
 <label class="f"><span>実施日</span><input type="date" data-bind="p.producer.date" value="${esc(P.producer.date)}"></label>
 <label class="f"><span>点検者</span><input type="text" data-bind="p.producer.inspector" value="${esc(P.producer.inspector)}"></label>
 <button class="btn pri" data-act="p-start" style="width:100%">点検に進む（${pScope().length}項目）</button></div>
+${prevCard((()=>{const m=pvMatch('生産者',P.producer.name);return m.length?`（${esc(P.producer.name)}さんの前回分：${m.length}件）`:(P.producer.name?'（この名前の前回分はありません）':'')})())}
 <div class="card"><h3>その他</h3><div class="btns"><button class="btn sm" data-act="p-load-setting">設定ファイルを読み込み直す</button><button class="btn sm dng" data-act="p-reset">この端末の入力を消去</button></div></div></div>`};
-VIEWS['p-check']=()=>{const ctx={mode:'self',items:pScope(),kub:id=>kb(P.setting.kubun,id),get:id=>P.answers[id],set:(id,a)=>{setAns(P.answers,id,a);touch(P)},refs:()=>[]};
+VIEWS['p-check']=()=>{const ctx={mode:'self',items:pScope(),kub:id=>kb(P.setting.kubun,id),get:id=>P.answers[id],set:(id,a)=>{setAns(P.answers,id,a);touch(P)},refs:()=>[],prevRecs:pvMatch('生産者',P.producer.name)};
  return `${bar(P.producer.name+' さんの自己点検','p-setup')}${checklist(ctx)}
 <div class="foot"><div class="in"><button class="btn" data-go="p-setup">基本情報</button><button class="btn pri" data-act="p-save">結果を送る・保存</button></div><div style="text-align:center;max-width:728px;margin:4px auto 0">${dirtyMark(P)}</div></div>`};
 
@@ -373,6 +416,7 @@ ${G.producers.length>8?`<input type="search" id="lq" placeholder="生産者名�
 <div class="card"><h2>⑤ 様式どおりのExcelを出力</h2><p class="mut small">配布されている元の点検表Excelに、結果を書き込んだファイルを作ります。生産者を選ぶと、その生産者と団体の結果を1枚にまとめます。「両方」の項目は、1つのセルに「生○／団○」の形で両方の結果が入ります。最初の1回だけ、元の点検表Excelファイルを選ぶ画面が出ます。</p>
 <select id="fx-g" style="margin-bottom:8px"><option value="group">${esc((G.group.name||'団体')+'（団体のみ）')}</option>${G.producers.slice().sort((a,b)=>a.name.localeCompare(b.name,'ja')).map(p=>`<option value="${p.id}">${esc(p.name)} ＋ 団体（統合）</option>`).join('')}</select>
 <button class="btn pri" data-act="form-xl-sel" data-src="g" style="width:100%">様式どおりのExcelを作る</button></div>
+${prevCard((()=>{const g=pvMatch('団体','',G.group.name).length;const p=G.producers.filter(x=>pvMatch('生産者',x.name).length).length;return `（団体の前回分：${g}件／前回分がある生産者：${p}名）`})())}
 <div class="card"><h3>その他</h3><div class="btns"><button class="btn sm" data-act="g-resume">別の集約ファイルを開く</button><button class="btn sm dng" data-act="g-reset">この端末のデータを消去</button></div></div></div>`};
 VIEWS['g-setting']=()=>{const q=UI.q.trim();let h='';M.sections.forEach(s=>{let sh='';s.n.forEach(n=>n.items.forEach(it0=>{const it=BYID[it0.id];const k=kb(G.kubun,it.id);
    if(UI.filter==='chg'&&k===it.k)return;if(q&&!(it.id.includes(q)||it.t.includes(q)))return;
@@ -380,11 +424,11 @@ VIEWS['g-setting']=()=>{const q=UI.q.trim();let h='';M.sections.forEach(s=>{let 
    if(sh)h+=`<h3 style="margin:18px 0 0">${esc(s.t)}</h3>${sh}`});
  return `${bar('区分の確認・修正','g-home')}<div class="prog"><div class="tools"><input type="search" id="q" placeholder="番号・語句で検索" value="${esc(UI.q)}"></div><div class="fchips"><button data-f="all" class="${UI.filter==='all'?'on':''}">すべて</button><button data-f="chg" class="${UI.filter==='chg'?'on':''}">変更した項目</button></div></div>
 <div class="wrap"><p class="note">区分を変えたら、生産者へ設定ファイルを配り直してください。</p><div class="card" id="list">${h||'<p class="mut">該当なし</p>'}</div></div>`};
-VIEWS['g-check']=()=>{const ctx={mode:'self',items:gScope(),kub:id=>kb(G.kubun,id),get:id=>G.self.answers[id],set:(id,a)=>{setAns(G.self.answers,id,a);touch(G)},refs:()=>[]};
+VIEWS['g-check']=()=>{const ctx={mode:'self',items:gScope(),kub:id=>kb(G.kubun,id),get:id=>G.self.answers[id],set:(id,a)=>{setAns(G.self.answers,id,a);touch(G)},refs:()=>[],prevRecs:pvMatch('団体','',G.group.name)};
  return `${bar('団体の自己点検','g-home')}<div class="wrap" style="padding-bottom:0"><div class="card" style="margin:0"><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px"><label class="f" style="margin:0"><span>実施日</span><input type="date" data-bind="g.self.date" value="${esc(G.self.date)}"></label><label class="f" style="margin:0"><span>点検者</span><input type="text" data-bind="g.self.inspector" value="${esc(G.self.inspector)}"></label></div></div></div>${checklist(ctx)}
 <div class="foot"><div class="in"><button class="btn" data-act="form-xl" data-src="g" data-id="group">様式Excel</button><button class="btn pri" data-act="g-save">ファイルに保存</button></div></div>`};
 VIEWS['g-view']=()=>{const p=prodOf(G,UI.tid);if(!p)return VIEWS['g-home']();
- const ctx={mode:'self',readonly:true,items:scopeItems('producer',G.kubun,p.crops),kub:id=>kb(G.kubun,id),get:id=>p.answers[id],refs:()=>[]};
+ const ctx={mode:'self',readonly:true,items:scopeItems('producer',G.kubun,p.crops),kub:id=>kb(G.kubun,id),get:id=>p.answers[id],refs:()=>[],prevRecs:pvMatch('生産者',p.name)};
  return `${bar(p.name+' さん','g-home')}<div class="wrap" style="padding-bottom:0"><div class="card" style="margin:0"><p class="mut small" style="margin:0">品目：${esc(cropLabel(p.crops,p.cropText)||'指定なし')}　実施日：${esc(jdate(p.date))}　点検者：${esc(p.inspector||'')}<br>取込：${esc(dt(p.importedAt))}（${esc(p.source||'')}）</p></div></div>${checklist(ctx)}
 <div class="foot"><div class="in"><button class="btn dng" data-act="g-del" data-id="${p.id}">取り込みを取消</button><button class="btn pri" data-act="form-xl" data-src="g" data-id="${p.id}">様式Excelを出力</button></div></div>`};
 
@@ -408,6 +452,7 @@ ${A.type==='twoparty'?`<label class="f"><span>生協名 ＊</span><input type="t
 <label class="f"><span>実施日</span><input type="date" data-bind="a.date" value="${esc(A.date)}"></label>
 <label class="f"><span>${A.type==='twoparty'?'点検者':'監査担当者'}</span><input type="text" data-bind="a.inspector" value="${esc(A.inspector)}"></label>
 <button class="btn pri" data-go="a-targets" style="width:100%" ${mism?'disabled':''}>対象を選んで評価する</button></div>
+${prevCard((()=>{const ts=targetsOf(AS);return `（前回分がある対象：${ts.filter(t=>(t.type==='団体'?pvMatch('団体','',AS.group.name):pvMatch('生産者',t.label)).length).length}／${ts.length}）`})())}
 <div class="card"><h3>その他</h3><div class="btns"><button class="btn sm" data-act="a-resume">別の監査ファイルを開く</button><button class="btn sm dng" data-act="a-reset">この端末の監査データを消去</button></div></div></div>`};
 VIEWS['a-targets']=()=>{if(!A||!AS)return VIEWS['a-setup']();const ts=targetsOf(AS);const q=UI.lq.trim();
  return `${bar(aLabel(A.type)+'：'+(AS.group.name||''),'a-setup')}<div class="wrap">
@@ -420,7 +465,7 @@ ${as.done?`<span class="pill${as.todo?'':' ok'}">評価 ${as.done}/${as.n}</span
 <select id="fx-a" style="margin-bottom:8px"><option value="group">${esc((AS.group.name||'団体')+'（団体のみ）')}</option>${AS.producers.slice().sort((a,b)=>a.name.localeCompare(b.name,'ja')).map(p=>`<option value="${p.id}">${esc(p.name)} ＋ 団体（統合）</option>`).join('')}</select>
 <button class="btn pri" data-act="form-xl-sel" data-src="a" style="width:100%">様式どおりのExcelを作る</button></div></div>`};
 VIEWS['a-check']=()=>{const t=targetsOf(AS).find(x=>x.tid===UI.tid);if(!t)return VIEWS['a-targets']();
- const ctx={mode:'audit',items:t.items,kub:id=>kb(AS.kubun,id),get:id=>((A.targets[t.tid]||{}).answers||{})[id],set:(id,a)=>{setAns(aAns(t.tid),id,a);touch(A)},refs:id=>refsFor(AS,t,id)};
+ const ctx={mode:'audit',items:t.items,kub:id=>kb(AS.kubun,id),get:id=>((A.targets[t.tid]||{}).answers||{})[id],set:(id,a)=>{setAns(aAns(t.tid),id,a);touch(A)},refs:id=>refsFor(AS,t,id),prevRecs:t.type==='団体'?pvMatch('団体','',AS.group.name):pvMatch('生産者',t.label)};
  return `${bar(aLabel(A.type)+'：'+t.label,'a-targets')}${checklist(ctx)}
 <div class="foot"><div class="in"><button class="btn" data-act="form-xl" data-src="a" data-id="${t.tid}">様式Excel</button><button class="btn pri" data-act="a-save">ファイルに保存</button></div></div>`};
 
@@ -453,9 +498,9 @@ async function readSheetCells(buf,sheetName){const get=await unzip(buf);const wb
     cells[r]=String(val).trim()});return cells}
 async function readXl(file){const buf=await file.arrayBuffer();let cells;try{cells=await readSheetCells(buf,'点検表')}catch(e){throw new Error(file.name+'：'+e.message)}
   if(!cells)throw new Error(file.name+' に「点検表」シートがありません');const c=a=>cells[a]||'';
-  const rows={};Object.keys(cells).forEach(a=>{const m=a.match(/^A(\d+)$/);if(!m)return;const id=cells[a].replace(/\s/g,'');if(BYID[id]&&!rows[id]){const r=m[1];rows[id]={k:normK(c('C'+r)),v:normV(c('D'+r)),c:c('E'+r)}}});
+  const rows={};Object.keys(cells).forEach(a=>{const m=a.match(/^A(\d+)$/);if(!m)return;const id=cells[a].replace(/\s/g,'');if(BYID[id]&&!rows[id]){const r=m[1];rows[id]={k:normK(c('C'+r)),v:c('D'+r),c:c('E'+r),f:c('F'+r),g:c('G'+r)}}});
   const d=s=>{s=String(s||'').replace(/[\/.年月]/g,'-').replace(/日/,'');const m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);return m?m[1]+'-'+pad(m[2])+'-'+pad(m[3]):''};
-  return {rows,coop:c('B1'),group:c('A8'),producer:c('D8'),crop:c('F8'),gDate:d(c('D11')),gIns:c('F11'),pDate:d(c('D12')),pIns:c('F12')}}
+  return {rows,coop:c('B1'),group:c('A8'),producer:c('D8'),crop:c('F8'),gDate:d(c('D11')),gIns:c('F11'),pDate:d(c('D12')),pIns:c('F12'),iDate:d(c('D13')),tDate:d(c('D14'))}}
 async function buildForm(S,tid,Au){const tpl=await getTemplate();if(!tpl)return null;
   const wb=new ExcelJS.Workbook();await wb.xlsx.load(tpl);const ws=wb.getWorksheet('点検表');
   const p=tid==='group'?null:prodOf(S,tid);const set=(a,v)=>{ws.getCell(a).value=(v===''||v==null)?null:v};
@@ -508,6 +553,14 @@ function checkMaster(o){if(o.master&&o.master!==MASTER_VER)toast('注意：フ�
 /* ========== 操作 ========== */
 const ACT={};
 ACT.cmt=el=>{const card=el.closest('.item');UI.openC.add(card.dataset.id);const cm=card.querySelector('.cm');cm.classList.add('open');cm.querySelector('textarea').focus()};
+ACT['pv-load']=async()=>{const fs=await pickFiles('.txt,.json,.xlsx,text/plain,application/json,'+XLSX_MIME,true);if(!fs.length)return;let n=0;const errs=[];
+  for(const f of fs){try{n+=await pvLoadFile(f)}catch(e){errs.push(e.message)}}persist();render();toast(`前回の結果を ${n}件 読み込みました`+(errs.length?'\n'+errs.join('\n'):''),errs.length?6000:3000)};
+ACT['pv-del']=el=>{PV.recs.splice(+el.dataset.i,1);persist();render()};
+ACT['pv-clear']=()=>{if(!confirm('読み込んだ前回の結果をすべて削除しますか？（元のファイルは消えません）'))return;PV={recs:[],idmap:{}};persist();render()};
+ACT['pv-toggle']=()=>{UI.showPrev=!UI.showPrev;render()};
+ACT['pv-copy']=el=>{const ctx=UI.ctx;if(!ctx)return;const id=el.closest('.item').dataset.id;const r=ctx.prevRecs[+el.dataset.k];const a=r&&r.answers[id];if(!a)return;
+  const cur=ctx.get(id);if(cur&&(cur.v||cur.c)&&!(cur.v===a.v&&cur.c===a.c)&&!confirm('いまの入力を、前回の内容で置き換えますか？'))return;
+  ctx.set(id,{v:a.v||'',c:a.c||''});if(a.c)UI.openC.add(id);refreshCard(id);refreshProg();toast('前回の内容をコピーしました。内容を確認し、必要なら修正してください')};
 ACT['sh-share']=async()=>{const s=UI.sheet;try{await navigator.share({files:[s.file],title:s.name});s.onSaved&&s.onSaved();closeSheet();toast('送信画面を開きました')}catch(e){if(e.name!=='AbortError')toast('送れませんでした。「この端末に保存」をお使いください')}};
 ACT['sh-dl']=()=>{const s=UI.sheet;download(s.blob,s.name);s.onSaved&&s.onSaved();closeSheet();toast('保存しました')};
 ACT['sh-close']=closeSheet;
@@ -540,7 +593,7 @@ ACT['g-setting-file']=()=>{if(!G.group.name.trim()){toast('団体名を入力し
 ACT['g-import']=async()=>{const fs=await pickFiles('.txt,.json,.xlsx,text/plain,application/json,'+XLSX_MIME,true);if(!fs.length)return;let add=0,upd=0,skip=0;const errs=[];
   for(const f of fs){try{let rec;
     if(/\.xlsx$/i.test(f.name)){const x=await readXl(f);if(!x.producer)throw new Error(f.name+'：生産者名（D8）が空欄です');const ans={};
-      Object.entries(x.rows).forEach(([id,r])=>{const k=kb(G.kubun,id);if((k==='生産者'||k==='両方')&&(r.v||r.c))ans[id]={v:r.v,c:r.c}});
+      Object.entries(x.rows).forEach(([id,r])=>{const k=kb(G.kubun,id);const pv=splitWho(r.v,r.c,'生');if((k==='生産者'||k==='両方')&&(pv.v||pv.c))ans[id]=pv});
       rec={id:'xl-'+uid(),name:x.producer,crops:CROPS.filter(c=>x.crop.includes(c)),cropText:x.crop,date:x.pDate,inspector:x.pIns,answers:ans,updated:nowISO(),source:f.name+'（Excel）'}}
     else{const o=await readJSON(f);if(o.kind!=='sgap-self-producer')throw new Error(f.name+'：生産者の自己点検ファイルではありません');checkMaster(o);
       if(o.setting.settingId&&o.setting.settingId!==G.id)errs.push(f.name+'：別の設定ファイルで点検されています（取り込みはしました）');
@@ -565,6 +618,7 @@ ACT['a-resume']=async()=>{const [f]=await pickFiles('.txt,.json,text/plain,appli
   if(!AS||AS.id!==A.ref.selfId)toast(`対応する自己点検集約ファイル（${A.ref.groupName}）も読み込んでください`,5000);go('a-setup')}catch(e){toast(e.message,4000)}};
 ACT['a-reset']=()=>{if(!confirm('この端末に一時保存されている監査データと、読み込んだ自己点検集約ファイルを閉じます。保存したファイルは消えません。よろしいですか？'))return;A=null;AS=null;persist();go('home')};
 ACT['a-save']=()=>{if(A.type==='twoparty'&&!String(A.coop||'').trim()){toast('生協名を入力してください');go('a-setup');return}
+  const ts0=targetsOf(AS);Object.keys(A.targets).forEach(tid=>{const t=ts0.find(x=>x.tid===tid);if(t){A.targets[tid].label=t.type==='団体'?AS.group.name:t.label;A.targets[tid].type=t.type}});
   const o=Object.assign({},A);delete o.savedAt;const ts=targetsOf(AS);let w=0;ts.forEach(t=>w+=aStat(AS,t).w);
   openSheet({title:aLabel(A.type)+'ファイルを保存',body:`${w?`<div class="note">要コメントの項目が ${w} 件あります。</div>`:''}<p class="mut small">自己点検集約ファイルとは別のファイルとして保存します。記録として、参照した集約ファイルと一緒に保管してください。</p>`,
    blob:jsonBlob(o),name:`${aLabel(A.type)}_${fnSafe(A.type==='twoparty'?A.coop:'')}${A.type==='twoparty'?'_':''}${fnSafe(AS.group.name)}_${ymd(A.date)}.txt`,onSaved:()=>{A.savedAt=nowISO();persist();const d=$('#dirty');if(d)d.textContent=''}})};
@@ -579,7 +633,7 @@ ACT['list-xl']=async el=>{const src=el.dataset.src;const S=src==='a'?AS:G,Au=src
 /* ========== イベント ========== */
 const ROOTS={p:()=>P,g:()=>G,a:()=>A};
 document.addEventListener('click',e=>{const t=e.target;
-  const ge=t.closest('[data-go]');if(ge){if(ge.dataset.go==='ref')UI.back=UI.view;go(ge.dataset.go,ge.dataset.tid?{tid:ge.dataset.tid}:{});return}
+  const ge=t.closest('[data-go]');if(ge){if(ge.dataset.go==='ref'||ge.dataset.go==='pv')UI.back=UI.view;go(ge.dataset.go,ge.dataset.tid?{tid:ge.dataset.tid}:{});return}
   const ae=t.closest('[data-act]');if(ae&&ACT[ae.dataset.act]){ACT[ae.dataset.act](ae,e);return}
   const fe=t.closest('[data-f]');if(fe){UI.filter=fe.dataset.f;render();return}
   const ve=t.closest('button[data-v]');if(ve&&UI.ctx){const id=ve.closest('.item').dataset.id;const cur=UI.ctx.get(id)||{};const v=cur.v===ve.dataset.v?'':ve.dataset.v;
@@ -594,7 +648,7 @@ document.addEventListener('input',e=>{const t=e.target;
 document.addEventListener('change',e=>{const t=e.target;
   if(t.dataset.crop){const o=ROOTS[t.dataset.crop]();const tgt=t.dataset.crop==='p'?o.producer:o.group;const set=new Set(tgt.crops);t.checked?set.add(t.value):set.delete(t.value);tgt.crops=CROPS.filter(c=>set.has(c));touch(o);if(UI.view==='p-setup')render();return}
   if(t.id==='jump'&&t.value!==''){const s=document.getElementById('sec'+t.value);if(s)s.scrollIntoView({behavior:'smooth'});t.value=''}});
-window.addEventListener('pagehide',()=>{clearTimeout(saveT);[['p',P],['g',G],['a',A],['as',AS]].forEach(([k,v])=>v?store(k,v):drop(k))});
+window.addEventListener('pagehide',()=>{clearTimeout(saveT);[['p',P],['g',G],['a',A],['as',AS],['pv',PV]].forEach(([k,v])=>v?store(k,v):drop(k))});
 if(typeof ExcelJS==='undefined')toast('Excel機能を読み込めませんでした',5000);
 render();
 </script>
