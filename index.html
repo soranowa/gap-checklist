@@ -295,10 +295,11 @@ function canShare(file){try{return !!(navigator.canShare&&navigator.canShare({fi
 function openSheet({title,body='',blob,name,onSaved}){const file=new File([blob],name,{type:blob.type});UI.sheet={blob,name,file,onSaved};
   $('#modal').innerHTML=`<div class="modal" data-act="sh-bg"><div class="sheet"><h2>${esc(title)}</h2>${body}<div class="fname">📄 ${esc(name)}</div>
 <div class="btns col">${canShare(file)?`<button class="btn pri" data-act="sh-share">LINE・メールなどで送る</button>`:''}<button class="btn ${canShare(file)?'':'pri'}" data-act="sh-dl">この端末に保存（ダウンロード）</button><button class="btn" data-act="sh-close">閉じる</button></div>
+${canShare(file)?'':`<p class="note small" style="margin-top:12px">${/\.xlsx$/i.test(name)?'Excelファイルは、ブラウザの制限により共有画面から直接送れません。':'この端末・ブラウザでは共有画面を使えません。'}いったん「この端末に保存」をして、LINEのトーク画面の「＋」→「ファイル」、またはメールの添付で送ってください。</p>`}
 <p class="mut small">送る・保存したファイルは、相手がこのアプリで読み込んで使います。</p></div></div>`}
 function closeSheet(){$('#modal').innerHTML='';UI.sheet=null}
 function download(blob,name){const u=URL.createObjectURL(blob);const a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000)}
-const jsonBlob=o=>new Blob([JSON.stringify(o,null,1)],{type:'application/json'});
+const jsonBlob=o=>new Blob([JSON.stringify(o,null,1)],{type:'text/plain'});
 const XLSX_MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 /* ========== ホーム ========== */
@@ -362,7 +363,7 @@ VIEWS['g-home']=()=>{if(!G)return `${bar('団体事務局','home')}<div class="w
 <div class="btns"><button class="btn pri" data-go="g-check">団体の自己点検を入力する</button></div></div>
 <div class="card"><h2>③ 生産者の自己点検（${G.producers.length}名）</h2>
 <div class="btns"><button class="btn pri" data-act="g-import" style="width:100%">生産者の結果ファイルを取り込む（複数可）</button></div>
-<p class="mut small">自己点検ファイル（.json）のほか、Excel点検表（.xlsx）に入力されたものも取り込めます。同じ生産者の新しいファイルは上書きされます。</p>
+<p class="mut small">自己点検ファイル（.txt／.json）のほか、Excel点検表（.xlsx）に入力されたものも取り込めます。同じ生産者の新しいファイルは上書きされます。</p>
 ${G.producers.length>8?`<input type="search" id="lq" placeholder="生産者名で絞り込み" value="${esc(UI.lq)}" style="margin-bottom:8px">`:''}
 <div class="rows">${prods.map(p=>{const s=st(scopeItems('producer',G.kubun,p.crops),id=>p.answers[id]);return `<div class="row"><div class="rn"><b>${esc(p.name)}</b><span>${esc(cropLabel(p.crops,p.cropText))} ${p.date?'／'+jdate(p.date):''}</span></div>
 <span class="pill${s.todo?' w':' ok'}">${s.done}/${s.n}</span>${s.x?`<span class="pill x">✕${s.x}</span>`:''}<button class="btn sm" data-act="g-view" data-id="${p.id}">見る</button><button class="btn sm" data-act="form-xl" data-src="g" data-id="${p.id}">Excel</button></div>`}).join('')||'<p class="mut small">まだ取り込まれていません。</p>'}</div></div>
@@ -513,18 +514,18 @@ ACT['sh-close']=closeSheet;
 ACT['sh-bg']=(el,e)=>{if(e.target===el)closeSheet()};
 // 生産者
 ACT['p-new']=()=>{P=newP();persist();go('p-setup')};
-ACT['p-load-setting']=async()=>{const [f]=await pickFiles('.json,application/json');if(!f)return;try{const o=await readJSON(f);if(o.kind!=='sgap-setting')throw new Error('これは設定ファイルではありません');checkMaster(o);
+ACT['p-load-setting']=async()=>{const [f]=await pickFiles('.txt,.json,text/plain,application/json');if(!f)return;try{const o=await readJSON(f);if(o.kind!=='sgap-setting')throw new Error('これは設定ファイルではありません');checkMaster(o);
   const s={settingId:o.settingId,groupName:o.group.name||'',coop:o.group.coop||'',kubun:o.kubun||{}};if(!P)P=newP(s);else P.setting=s;touch(P);toast('設定ファイルを読み込みました（'+(o.group.name||'')+'）');go('p-setup')}catch(e){toast(e.message,4000)}};
-ACT['p-resume']=async()=>{const [f]=await pickFiles('.json,application/json');if(!f)return;try{const o=await readJSON(f);if(o.kind!=='sgap-self-producer')throw new Error('これは生産者の自己点検ファイルではありません');checkMaster(o);P=o;P.savedAt=P.updated;persist();go('p-setup')}catch(e){toast(e.message,4000)}};
+ACT['p-resume']=async()=>{const [f]=await pickFiles('.txt,.json,text/plain,application/json');if(!f)return;try{const o=await readJSON(f);if(o.kind!=='sgap-self-producer')throw new Error('これは生産者の自己点検ファイルではありません');checkMaster(o);P=o;P.savedAt=P.updated;persist();go('p-setup')}catch(e){toast(e.message,4000)}};
 ACT['p-start']=()=>{if(!P.producer.name.trim()){toast('生産者名を入力してください');return}go('p-check')};
 ACT['p-reset']=()=>{if(!confirm('この端末に一時保存されている自己点検の入力を消去します。保存したファイルは消えません。よろしいですか？'))return;P=null;persist();go('home')};
-ACT['p-save']=()=>{const s=st(pScope(),id=>P.answers[id]);const name=`自己点検_${fnSafe(P.setting.groupName)}_${fnSafe(P.producer.name)}_${ymd(P.producer.date)}.json`;
+ACT['p-save']=()=>{const s=st(pScope(),id=>P.answers[id]);const name=`自己点検_${fnSafe(P.setting.groupName)}_${fnSafe(P.producer.name)}_${ymd(P.producer.date)}.txt`;
   const o=Object.assign({},P,{updated:P.updated});delete o.savedAt;
   openSheet({title:'自己点検の結果を送る・保存',body:`${s.todo?`<div class="note">未入力が ${s.todo} 件あります。途中でも保存できます。</div>`:'<p class="pill ok" style="display:inline-block">すべて入力済みです</p>'}<p class="mut small">団体事務局へ送ってください。あとで続きを入力するときは、このファイルを「自己点検ファイルを開く」で読み込みます。</p>`,
    blob:jsonBlob(o),name,onSaved:()=>{P.savedAt=nowISO();persist();const d=$('#dirty');if(d)d.textContent=''}})};
 // 団体
 ACT['g-new']=()=>{G=newG();persist();go('g-home')};
-ACT['g-resume']=async()=>{const [f]=await pickFiles('.json,application/json');if(!f)return;try{const o=await readJSON(f);if(o.kind!=='sgap-self-group')throw new Error('これは自己点検集約ファイルではありません');checkMaster(o);
+ACT['g-resume']=async()=>{const [f]=await pickFiles('.txt,.json,text/plain,application/json');if(!f)return;try{const o=await readJSON(f);if(o.kind!=='sgap-self-group')throw new Error('これは自己点検集約ファイルではありません');checkMaster(o);
   if(G&&G.id!==o.id&&!confirm('いま開いている団体のデータを、読み込んだファイルに置き換えます。よろしいですか？'))return;G=o;G.savedAt=G.updated;persist();go('g-home')}catch(e){toast(e.message,4000)}};
 ACT['g-reset']=()=>{if(!confirm('この端末に一時保存されている団体のデータ（集約中の生産者分を含む）を消去します。保存したファイルは消えません。よろしいですか？'))return;G=null;persist();go('home')};
 ACT['g-xl-kubun']=async()=>{const [f]=await pickFiles('.xlsx,'+XLSX_MIME);if(!f)return;try{const buf=await f.arrayBuffer();const x=await readXl(new File([buf],f.name));let n=0,bad=0,chg=0;const km={};
@@ -535,8 +536,8 @@ ACT['g-xl-kubun']=async()=>{const [f]=await pickFiles('.xlsx,'+XLSX_MIME);if(!f)
 ACT['kb-set']=el=>{const id=el.dataset.id,k=el.dataset.k;if(k===BYID[id].k)delete G.kubun[id];else G.kubun[id]=k;touch(G);const row=el.closest('.krow');row.classList.toggle('chg',k!==BYID[id].k);row.querySelectorAll('.seg button').forEach(b=>b.classList.toggle('on',b.dataset.k===k))};
 ACT['g-setting-file']=()=>{if(!G.group.name.trim()){toast('団体名を入力してください');return}
   const o={kind:'sgap-setting',fmt:FMT,master:MASTER_VER,settingId:G.id,group:{name:G.group.name,coop:G.group.coop},kubun:G.kubun,created:nowISO()};
-  openSheet({title:'生産者に配る設定ファイル',body:`<p class="mut small">このファイルを生産者に送ります。生産者はアプリで「設定ファイルを読み込んで始める」を選びます。区分を変更したときは配り直してください。</p>`,blob:jsonBlob(o),name:`設定_${fnSafe(G.group.name)}_${ymd()}.json`})};
-ACT['g-import']=async()=>{const fs=await pickFiles('.json,.xlsx,application/json,'+XLSX_MIME,true);if(!fs.length)return;let add=0,upd=0,skip=0;const errs=[];
+  openSheet({title:'生産者に配る設定ファイル',body:`<p class="mut small">このファイルを生産者に送ります。生産者はアプリで「設定ファイルを読み込んで始める」を選びます。区分を変更したときは配り直してください。</p>`,blob:jsonBlob(o),name:`設定_${fnSafe(G.group.name)}_${ymd()}.txt`})};
+ACT['g-import']=async()=>{const fs=await pickFiles('.txt,.json,.xlsx,text/plain,application/json,'+XLSX_MIME,true);if(!fs.length)return;let add=0,upd=0,skip=0;const errs=[];
   for(const f of fs){try{let rec;
     if(/\.xlsx$/i.test(f.name)){const x=await readXl(f);if(!x.producer)throw new Error(f.name+'：生産者名（D8）が空欄です');const ans={};
       Object.entries(x.rows).forEach(([id,r])=>{const k=kb(G.kubun,id);if((k==='生産者'||k==='両方')&&(r.v||r.c))ans[id]={v:r.v,c:r.c}});
@@ -554,19 +555,19 @@ ACT['g-del']=el=>{const p=prodOf(G,el.dataset.id);if(!p||!confirm(`「${p.name}�
 ACT['g-save']=()=>{if(!G.group.name.trim()){toast('団体名を入力してください');return}const o=Object.assign({},G);delete o.savedAt;
   const gs=st(gScope(),id=>G.self.answers[id]);
   openSheet({title:'自己点検集約ファイルを保存',body:`<p class="mut small">団体の自己点検 ${gs.done}/${gs.n}、生産者 ${G.producers.length}名分を1つのファイルにまとめます。内部監査・二者点検の担当者に渡し、記録として保管します。</p>`,
-   blob:jsonBlob(o),name:`自己点検集約_${fnSafe(G.group.name)}_${ymd()}.json`,onSaved:()=>{G.savedAt=nowISO();persist();render()}})};
+   blob:jsonBlob(o),name:`自己点検集約_${fnSafe(G.group.name)}_${ymd()}.txt`,onSaved:()=>{G.savedAt=nowISO();persist();render()}})};
 // 監査
-ACT['a-load-self']=async()=>{const [f]=await pickFiles('.json,application/json');if(!f)return;try{const o=await readJSON(f);if(o.kind!=='sgap-self-group')throw new Error('これは自己点検集約ファイルではありません');checkMaster(o);
+ACT['a-load-self']=async()=>{const [f]=await pickFiles('.txt,.json,text/plain,application/json');if(!f)return;try{const o=await readJSON(f);if(o.kind!=='sgap-self-group')throw new Error('これは自己点検集約ファイルではありません');checkMaster(o);
   if(A&&A.ref.selfId!==o.id&&!confirm(`開いている${aLabel(A.type)}（${A.ref.groupName}）とは別の団体・年度の集約ファイルです。${aLabel(A.type)}のデータを閉じて、この集約ファイルで新しく始めますか？\n（保存していない監査データは消えます）`))return;
   if(A&&A.ref.selfId!==o.id)A=null;AS=o;persist();toast('読み込みました：'+(o.group.name||''));go('a-setup')}catch(e){toast(e.message,4000)}};
 ACT['a-new']=el=>{A={kind:'sgap-audit',fmt:FMT,master:MASTER_VER,id:uid(),type:el.dataset.t,ref:{selfId:AS.id,groupName:AS.group.name,selfUpdated:AS.updated},coop:el.dataset.t==='twoparty'?'':(AS.group.coop||''),date:today(),inspector:'',targets:{},created:nowISO(),updated:nowISO()};persist();render()};
-ACT['a-resume']=async()=>{const [f]=await pickFiles('.json,application/json');if(!f)return;try{const o=await readJSON(f);if(o.kind!=='sgap-audit')throw new Error('これは内部監査・二者点検のファイルではありません');checkMaster(o);A=o;A.savedAt=A.updated;persist();
+ACT['a-resume']=async()=>{const [f]=await pickFiles('.txt,.json,text/plain,application/json');if(!f)return;try{const o=await readJSON(f);if(o.kind!=='sgap-audit')throw new Error('これは内部監査・二者点検のファイルではありません');checkMaster(o);A=o;A.savedAt=A.updated;persist();
   if(!AS||AS.id!==A.ref.selfId)toast(`対応する自己点検集約ファイル（${A.ref.groupName}）も読み込んでください`,5000);go('a-setup')}catch(e){toast(e.message,4000)}};
 ACT['a-reset']=()=>{if(!confirm('この端末に一時保存されている監査データと、読み込んだ自己点検集約ファイルを閉じます。保存したファイルは消えません。よろしいですか？'))return;A=null;AS=null;persist();go('home')};
 ACT['a-save']=()=>{if(A.type==='twoparty'&&!String(A.coop||'').trim()){toast('生協名を入力してください');go('a-setup');return}
   const o=Object.assign({},A);delete o.savedAt;const ts=targetsOf(AS);let w=0;ts.forEach(t=>w+=aStat(AS,t).w);
   openSheet({title:aLabel(A.type)+'ファイルを保存',body:`${w?`<div class="note">要コメントの項目が ${w} 件あります。</div>`:''}<p class="mut small">自己点検集約ファイルとは別のファイルとして保存します。記録として、参照した集約ファイルと一緒に保管してください。</p>`,
-   blob:jsonBlob(o),name:`${aLabel(A.type)}_${fnSafe(A.type==='twoparty'?A.coop:'')}${A.type==='twoparty'?'_':''}${fnSafe(AS.group.name)}_${ymd(A.date)}.json`,onSaved:()=>{A.savedAt=nowISO();persist();const d=$('#dirty');if(d)d.textContent=''}})};
+   blob:jsonBlob(o),name:`${aLabel(A.type)}_${fnSafe(A.type==='twoparty'?A.coop:'')}${A.type==='twoparty'?'_':''}${fnSafe(AS.group.name)}_${ymd(A.date)}.txt`,onSaved:()=>{A.savedAt=nowISO();persist();const d=$('#dirty');if(d)d.textContent=''}})};
 // Excel
 ACT['form-xl']=async el=>{const src=el.dataset.src,tid=el.dataset.id;const S=src==='a'?AS:G,Au=src==='a'?A:null;
   try{const blob=await buildForm(S,tid,Au);if(!blob)return;const nm=tid==='group'?S.group.name+'_団体':(prodOf(S,tid)||{}).name;
