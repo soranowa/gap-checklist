@@ -343,7 +343,7 @@ const XLSX_MIME='application/vnd.openxmlformats-officedocument.spreadsheetml.she
 
 /* ========== ホーム ========== */
 const VIEWS={};
-VIEWS.home=()=>`${bar('生協版GAP 点検表（試作版 Ver.08）')}<div class="wrap">
+VIEWS.home=()=>`${bar('生協版GAP 点検表（試作版 Ver0.8）')}<div class="wrap">
 <p class="mut">生協版適正農業規範 青果・米編 ${MASTER_VER}　使う人を選んでください。</p>
 <button class="card role" data-go="p-setup"><span class="tag">生産者</span><h2>自己点検をする</h2><div class="mut">区分が「生産者」「両方」の項目を点検し、結果ファイルを団体事務局へ送ります。</div>${P?`<div class="cont">▶ 続きから：${esc(P.producer.name||'（名前未入力）')}（${st(pScope(),id=>P.answers[id]).done}/${pScope().length}）</div>`:''}</button>
 <button class="card role" data-go="g-home"><span class="tag">団体事務局</span><h2>区分の設定・団体の自己点検・集約</h2><div class="mut">区分を設定して生産者へ配り、届いた結果を1つの「自己点検集約ファイル」にまとめます。</div>${G?`<div class="cont">▶ 続きから：${esc(G.group.name||'（団体名未入力）')}（生産者 ${G.producers.length}名）</div>`:''}</button>
